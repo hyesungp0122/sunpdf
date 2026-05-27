@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sun Park PDF Maker</title>
+<style>
+  :root {
+    --primary: #1a3a6b;
+    --primary-hover: #254a82;
+    --border: #d1d5db;
+    --bg: #f8fafc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 32px 20px 80px;
+    background: var(--bg);
+    color: #111;
+  }
+  h1 {
+    color: var(--primary);
+    margin: 0 0 4px;
+    font-size: 26px;
+  }
+  .sub { color: #666; margin: 0 0 28px; font-size: 14px; }
+  .card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+  }
+  label {
+    display: block;
+    margin-top: 16px;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  label:first-child { margin-top: 0; }
+  input[type="text"], textarea {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-top: 6px;
+    background: white;
+  }
+  textarea {
+    min-height: 360px;
+    resize: vertical;
+    line-height: 1.6;
+  }
+  input:focus, textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(26, 58, 107, 0.12);
+  }
+  .actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+  }
+  button {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 11px 22px;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover:not(:disabled) { background: var(--primary-hover); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary {
+    background: white;
+    color: var(--primary);
+    border: 1px solid var(--primary);
+  }
+  button.secondary:hover:not(:disabled) { background: #eef2f9; }
+  .status {
+    margin-top: 14px;
+    font-size: 13px;
+    color: #555;
+    min-height: 18px;
+  }
+  .status.error { color: #b91c1c; }
+  .status.ok { color: #047857; }
+  .preview {
+    margin-top: 22px;
+    display: none;
+  }
+  .preview.visible { display: block; }
+  iframe {
+    width: 100%;
+    height: 720px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: white;
+  }
+</style>
+</head>
+<body>
+  <h1>Sun Park PDF Maker</h1>
+  <p class="sub">본문을 입력하고 PDF로 생성하세요. 헤더 / 풋터는 자동으로 추가됩니다.</p>
+
+  <div class="card">
+    <label for="filename">파일명</label>
+    <input type="text" id="filename" placeholder="document" value="document">
+
+    <label for="body">본문 내용</label>
+    <textarea id="body" placeholder="여기에 본문 내용을 입력하세요..."></textarea>
+
+    <div class="actions">
+      <button id="generate">PDF 다운로드</button>
+      <button id="preview-btn" class="secondary">미리보기</button>
+    </div>
+    <div class="status" id="status">준비 중...</div>
+  </div>
+
+  <div class="preview" id="preview">
+    <iframe id="preview-frame"></iframe>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
+<script>
+  const { PDFDocument, rgb, StandardFonts } = PDFLib;
+
+  const assets = {
+    sunparkLogo: null,
+    betterPropertiesLogo: null,
+    koreanFont: null,
+  };
+
+  const statusEl = document.getElementById('status');
+  const generateBtn = document.getElementById('generate');
+  const previewBtn = document.getElementById('preview-btn');
+
+  function setStatus(msg, type) {
+    statusEl.textContent = msg;
+    statusEl.className = 'status' + (type ? ' ' + type : '');
+  }
+
+  async function loadAssets() {
+    setStatus('로고와 폰트 로딩 중...');
+    try {
+      const [sp, bp, kf] = await Promise.all([
+        fetch('assets/sunpark_logo.png').then(r => {
+          if (!r.ok) throw new Error('sunpark_logo.png');
+          return r.arrayBuffer();
+        }),
+        fetch('assets/better_properties_logo.jpg').then(r => {
+          if (!r.ok) throw new Error('better_properties_logo.jpg');
+          return r.arrayBuffer();
+        }),
+        fetch('assets/NotoSansKR-Regular.otf').then(r => {
+          if (!r.ok) throw new Error('NotoSansKR-Regular.otf');
+          return r.arrayBuffer();
+        }),
+      ]);
+      assets.sunparkLogo = sp;
+      assets.betterPropertiesLogo = bp;
+      assets.koreanFont = kf;
+      setStatus('준비 완료', 'ok');
+      generateBtn.disabled = false;
+      previewBtn.disabled = false;
+    } catch (e) {
+      setStatus('에셋 로딩 실패: ' + e.message + ' — assets/ 폴더를 확인해주세요.', 'error');
+      generateBtn.disabled = true;
+      previewBtn.disabled = true;
+    }
+  }
+
+  function wrapText(text, font, size, maxWidth) {
+    const paragraphs = text.split('\n');
+    const lines = [];
+    for (const para of paragraphs) {
+      if (para === '') { lines.push(''); continue; }
+      // For Korean text, word-by-word split via spaces won't always work,
+      // so we fall back to per-character wrapping if a single token exceeds width.
+      const tokens = para.split(/(\s+)/); // keep spaces as tokens
+      let current = '';
+      for (const tok of tokens) {
+        const test = current + tok;
+        const w = font.widthOfTextAtSize(test, size);
+        if (w > maxWidth && current.trim() !== '') {
+          lines.push(current.replace(/\s+$/, ''));
+          current = tok.replace(/^\s+/, '');
+        } else {
+          current = test;
+        }
+      }
+      // If a single token is still too wide (e.g. very long Korean run), split by char
+      const flushed = [];
+      for (const line of [current]) {
+        if (font.widthOfTextAtSize(line, size) <= maxWidth) {
+          flushed.push(line);
+        } else {
+          let buf = '';
+          for (const ch of line) {
+            const t = buf + ch;
+            if (font.widthOfTextAtSize(t, size) > maxWidth && buf) {
+              flushed.push(buf);
+              buf = ch;
+            } else {
+              buf = t;
+            }
+          }
+          if (buf) flushed.push(buf);
+        }
+      }
+      lines.push(...flushed);
+    }
+    // Also need to char-wrap any pushed lines that are still too wide
+    const finalLines = [];
+    for (const l of lines) {
+      if (font.widthOfTextAtSize(l, size) <= maxWidth) {
+        finalLines.push(l);
+      } else {
+        let buf = '';
+        for (const ch of l) {
+          const t = buf + ch;
+          if (font.widthOfTextAtSize(t, size) > maxWidth && buf) {
+            finalLines.push(buf);
+            buf = ch;
+          } else {
+            buf = t;
+          }
+        }
+        if (buf) finalLines.push(buf);
+      }
+    }
+    return finalLines;
+  }
+
+  async function buildPdf() {
+    const bodyText = document.getElementById('body').value;
+
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.registerFontkit(fontkit);
+
+    const koreanFont = await pdfDoc.embedFont(assets.koreanFont, { subset: true });
+    const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    const sunparkImg = await pdfDoc.embedPng(assets.sunparkLogo);
+    const betterImg = await pdfDoc.embedJpg(assets.betterPropertiesLogo);
+
+    // Letter: 612 x 792 pt
+    const PAGE_W = 612, PAGE_H = 792;
+    const MARGIN_X = 54; // 0.75"
+    const MARGIN_TOP = 36; // 0.5"
+    const MARGIN_BOTTOM = 36; // 0.5"
+
+    // --- Header (SunPark logo, centered) ---
+    const headerMaxW = 360; // 5"
+    const headerScale = headerMaxW / sunparkImg.width;
+    const headerW = sunparkImg.width * headerScale;
+    const headerH = sunparkImg.height * headerScale;
+    const headerX = (PAGE_W - headerW) / 2;
+
+    // --- Footer (Better Properties logo + contact) ---
+    const footerLogoW = 70;
+    const footerScale = footerLogoW / betterImg.width;
+    const footerLogoH = betterImg.height * footerScale;
+
+    const footerLines = [
+      { text: 'Sun Park', font: helveticaBold, size: 13 },
+      { text: 'Better Properties N. Proctor', font: helvetica, size: 11 },
+      { text: 'Real Estate Broker', font: helvetica, size: 11 },
+      { text: '253-241-2307', font: helvetica, size: 11 },
+    ];
+    const footerTextLineHeight = 15;
+    const footerTextBlockH = footerLines.length * footerTextLineHeight;
+    const footerBlockH = Math.max(footerLogoH, footerTextBlockH);
+
+    // Body region calculation
+    const bodyFontSize = 12;
+    const bodyLineHeight = bodyFontSize * 1.6;
+    const bodyTopY = PAGE_H - MARGIN_TOP - headerH - 24; // gap below header
+    const bodyBottomY = MARGIN_BOTTOM + footerBlockH + 24; // gap above footer
+    const bodyMaxW = PAGE_W - 2 * MARGIN_X;
+
+    const wrappedLines = wrapText(bodyText, koreanFont, bodyFontSize, bodyMaxW);
+
+    // Paginate
+    const linesPerPage = Math.max(1, Math.floor((bodyTopY - bodyBottomY) / bodyLineHeight));
+    const pageChunks = [];
+    for (let i = 0; i < wrappedLines.length; i += linesPerPage) {
+      pageChunks.push(wrappedLines.slice(i, i + linesPerPage));
+    }
+    if (pageChunks.length === 0) pageChunks.push([]);
+
+    for (const chunk of pageChunks) {
+      const page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+
+      // Header
+      page.drawImage(sunparkImg, {
+        x: headerX,
+        y: PAGE_H - MARGIN_TOP - headerH,
+        width: headerW,
+        height: headerH,
+      });
+
+      // Body
+      let y = bodyTopY;
+      for (const line of chunk) {
+        page.drawText(line, {
+          x: MARGIN_X,
+          y: y,
+          size: bodyFontSize,
+          font: koreanFont,
+          color: rgb(0, 0, 0),
+        });
+        y -= bodyLineHeight;
+      }
+
+      // Footer logo
+      const footerY = MARGIN_BOTTOM;
+      const footerLogoY = footerY + (footerBlockH - footerLogoH) / 2;
+      page.drawImage(betterImg, {
+        x: MARGIN_X,
+        y: footerLogoY,
+        width: footerLogoW,
+        height: footerLogoH,
+      });
+
+      // Footer text
+      const footerTextX = MARGIN_X + footerLogoW + 18;
+      const footerTextTopY = footerY + (footerBlockH + footerTextBlockH) / 2 - footerLines[0].size;
+      let ty = footerTextTopY;
+      for (const line of footerLines) {
+        page.drawText(line.text, {
+          x: footerTextX,
+          y: ty,
+          size: line.size,
+          font: line.font,
+          color: rgb(0.1, 0.18, 0.36),
+        });
+        ty -= footerTextLineHeight;
+      }
+    }
+
+    return await pdfDoc.save();
+  }
+
+  async function downloadPdf() {
+    setStatus('PDF 생성 중...');
+    generateBtn.disabled = true;
+    try {
+      const bytes = await buildPdf();
+      const name = (document.getElementById('filename').value.trim() || 'document') + '.pdf';
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setStatus('다운로드 완료: ' + name, 'ok');
+    } catch (e) {
+      console.error(e);
+      setStatus('생성 실패: ' + e.message, 'error');
+    } finally {
+      generateBtn.disabled = false;
+    }
+  }
+
+  async function showPreview() {
+    setStatus('미리보기 생성 중...');
+    previewBtn.disabled = true;
+    try {
+      const bytes = await buildPdf();
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const frame = document.getElementById('preview-frame');
+      const prev = frame.dataset.url;
+      if (prev) URL.revokeObjectURL(prev);
+      frame.dataset.url = url;
+      frame.src = url;
+      document.getElementById('preview').classList.add('visible');
+      setStatus('미리보기 준비 완료', 'ok');
+    } catch (e) {
+      console.error(e);
+      setStatus('미리보기 실패: ' + e.message, 'error');
+    } finally {
+      previewBtn.disabled = false;
+    }
+  }
+
+  generateBtn.addEventListener('click', downloadPdf);
+  previewBtn.addEventListener('click', showPreview);
+
+  generateBtn.disabled = true;
+  previewBtn.disabled = true;
+  loadAssets();
+</script>
+</body>
+</html>
