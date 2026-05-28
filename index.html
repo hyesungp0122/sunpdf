@@ -374,23 +374,50 @@
   async function showPreview() {
     setStatus('미리보기 생성 중...');
     previewBtn.disabled = true;
+    // Open the tab synchronously inside the click handler so mobile
+    // browsers (iOS Safari especially) don't treat it as a popup.
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    let newTab = null;
+    if (isMobile) newTab = window.open('', '_blank');
     try {
       const bytes = await buildPdf();
       const blob = new Blob([bytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      const frame = document.getElementById('preview-frame');
-      const prev = frame.dataset.url;
-      if (prev) URL.revokeObjectURL(prev);
-      frame.dataset.url = url;
-      frame.src = url;
-      document.getElementById('preview').classList.add('visible');
-      setStatus('미리보기 준비 완료', 'ok');
+      if (isMobile) {
+        if (newTab) {
+          newTab.location = url;
+        } else {
+          // Popup blocked — fall back to navigating current tab
+          window.location.href = url;
+        }
+        setStatus('새 탭에서 미리보기 열림', 'ok');
+      } else {
+        const frame = document.getElementById('preview-frame');
+        const prev = frame.dataset.url;
+        if (prev) URL.revokeObjectURL(prev);
+        frame.dataset.url = url;
+        frame.src = url;
+        document.getElementById('preview').classList.add('visible');
+        setStatus('미리보기 준비 완료 — 또는 ', 'ok');
+        statusEl.appendChild(makeOpenLink(url));
+      }
     } catch (e) {
+      if (newTab) newTab.close();
       console.error(e);
       setStatus('미리보기 실패: ' + e.message, 'error');
     } finally {
       previewBtn.disabled = false;
     }
+  }
+
+  function makeOpenLink(url) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = '새 탭에서 열기';
+    a.style.color = '#1a3a6b';
+    return a;
   }
 
   generateBtn.addEventListener('click', downloadPdf);
