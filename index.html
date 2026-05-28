@@ -171,8 +171,8 @@
           if (!r.ok) throw new Error('better_properties_logo.jpg');
           return r.arrayBuffer();
         }),
-        fetch('assets/NotoSansKR-Regular.otf').then(r => {
-          if (!r.ok) throw new Error('NotoSansKR-Regular.otf');
+        fetch('assets/Pretendard-Regular.otf').then(r => {
+          if (!r.ok) throw new Error('Pretendard-Regular.otf');
           return r.arrayBuffer();
         }),
       ]);
@@ -437,6 +437,13 @@
 
   generateBtn.addEventListener('click', downloadPdf);
   previewBtn.addEventListener('click', showPreview);
+
+  window.addEventListener('error', (e) => {
+    setStatus('오류: ' + (e.message || e.error), 'error');
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    setStatus('오류: ' + (e.reason && e.reason.message ? e.reason.message : e.reason), 'error');
+  });
 
   generateBtn.disabled = true;
   previewBtn.disabled = true;
