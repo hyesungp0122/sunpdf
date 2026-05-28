@@ -104,6 +104,19 @@
     border-radius: 8px;
     background: white;
   }
+  .open-pdf-link {
+    display: block;
+    margin-top: 14px;
+    padding: 14px 18px;
+    background: var(--primary);
+    color: white !important;
+    text-decoration: none;
+    text-align: center;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .open-pdf-link:active { background: var(--primary-hover); }
 </style>
 </head>
 <body>
@@ -124,9 +137,7 @@
     <div class="status" id="status">준비 중...</div>
   </div>
 
-  <div class="preview" id="preview">
-    <iframe id="preview-frame"></iframe>
-  </div>
+  <div class="preview" id="preview"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
@@ -374,50 +385,54 @@
   async function showPreview() {
     setStatus('미리보기 생성 중...');
     previewBtn.disabled = true;
-    // Open the tab synchronously inside the click handler so mobile
-    // browsers (iOS Safari especially) don't treat it as a popup.
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    let newTab = null;
-    if (isMobile) newTab = window.open('', '_blank');
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+      || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
     try {
       const bytes = await buildPdf();
       const blob = new Blob([bytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
+      // Stash previous blob URL so we can revoke it after the new one is rendered.
+      const previewDiv = document.getElementById('preview');
+      const prevUrl = previewDiv.dataset.url;
+      previewDiv.dataset.url = url;
+
+      previewDiv.innerHTML = '';
+      previewDiv.classList.add('visible');
+
       if (isMobile) {
-        if (newTab) {
-          newTab.location = url;
-        } else {
-          // Popup blocked — fall back to navigating current tab
-          window.location.href = url;
-        }
-        setStatus('새 탭에서 미리보기 열림', 'ok');
+        // iOS Safari / Android Chrome do not reliably render PDFs in
+        // iframes and block window.open() after an `await`. The most
+        // reliable fix: render a big tap-to-open link the user clicks
+        // themselves — the tap is a fresh user gesture.
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.className = 'open-pdf-link';
+        link.textContent = '📄 PDF 열기 (탭하세요)';
+        previewDiv.appendChild(link);
+        setStatus('PDF 준비됨 — 아래 버튼을 탭해서 여세요', 'ok');
       } else {
-        const frame = document.getElementById('preview-frame');
-        const prev = frame.dataset.url;
-        if (prev) URL.revokeObjectURL(prev);
-        frame.dataset.url = url;
+        const frame = document.createElement('iframe');
         frame.src = url;
-        document.getElementById('preview').classList.add('visible');
-        setStatus('미리보기 준비 완료 — 또는 ', 'ok');
-        statusEl.appendChild(makeOpenLink(url));
+        previewDiv.appendChild(frame);
+        const fallback = document.createElement('a');
+        fallback.href = url;
+        fallback.target = '_blank';
+        fallback.rel = 'noopener';
+        fallback.className = 'open-pdf-link';
+        fallback.textContent = '새 탭에서 열기';
+        previewDiv.appendChild(fallback);
+        setStatus('미리보기 준비 완료', 'ok');
       }
+
+      if (prevUrl) setTimeout(() => URL.revokeObjectURL(prevUrl), 2000);
     } catch (e) {
-      if (newTab) newTab.close();
       console.error(e);
       setStatus('미리보기 실패: ' + e.message, 'error');
     } finally {
       previewBtn.disabled = false;
     }
-  }
-
-  function makeOpenLink(url) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.textContent = '새 탭에서 열기';
-    a.style.color = '#1a3a6b';
-    return a;
   }
 
   generateBtn.addEventListener('click', downloadPdf);
