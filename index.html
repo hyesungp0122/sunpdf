@@ -172,7 +172,7 @@
   }
 
   // Bump this when assets change to force-bust browser cache.
-  const ASSET_VERSION = '6';
+  const ASSET_VERSION = '7';
 
   async function loadAssets() {
     setStatus('로고와 폰트 로딩 중...');
@@ -186,8 +186,8 @@
           if (!r.ok) throw new Error('better_properties_logo.jpg');
           return r.arrayBuffer();
         }),
-        fetch('assets/NanumGothic-Regular.ttf?v=' + ASSET_VERSION).then(r => {
-          if (!r.ok) throw new Error('NanumGothic-Regular.ttf');
+        fetch('assets/NotoSansKR-Regular.otf?v=' + ASSET_VERSION).then(r => {
+          if (!r.ok) throw new Error('NotoSansKR-Regular.otf');
           return r.arrayBuffer();
         }),
       ]);
@@ -204,8 +204,31 @@
 
   // Character-by-character wrapper. Handles Korean (no inter-word spaces),
   // English, and mixed text. Prefers breaking at the last whitespace on the
-  // current line; falls back to a hard character break if no space is found
-  // (e.g. long Korean run, URLs).
+  // current line; falls back to a hard character break if no space is found.
+  //
+  // Defensive: if font.widthOfTextAtSize throws or returns a non-positive
+  // number (a glyph missing from the font would give 0, which would let
+  // `current` grow forever and visually truncate), we estimate widths from
+  // Unicode ranges so the wrap still works.
+  function safeWidth(font, str, size) {
+    try {
+      const w = font.widthOfTextAtSize(str, size);
+      if (typeof w === 'number' && isFinite(w) && w > 0) return w;
+    } catch (_) {}
+    // Fallback: rough estimate. CJK ≈ full-width, ASCII ≈ half-width.
+    let est = 0;
+    for (const ch of str) {
+      const c = ch.codePointAt(0);
+      if (c >= 0x1100 && c <= 0x11FF) est += size;          // Hangul Jamo
+      else if (c >= 0x3000 && c <= 0x303F) est += size;     // CJK symbols
+      else if (c >= 0xAC00 && c <= 0xD7AF) est += size;     // Hangul Syllables
+      else if (c >= 0x4E00 && c <= 0x9FFF) est += size;     // CJK Unified
+      else if (c >= 0xFF00 && c <= 0xFFEF) est += size;     // Halfwidth/Fullwidth Forms
+      else est += size * 0.5;                                // Latin & misc.
+    }
+    return est;
+  }
+
   function wrapText(text, font, size, maxWidth) {
     const lines = [];
     for (const paragraph of text.split('\n')) {
@@ -213,9 +236,7 @@
       let current = '';
       for (const ch of paragraph) {
         const candidate = current + ch;
-        if (font.widthOfTextAtSize(candidate, size) > maxWidth && current.length > 0) {
-          // Try to break at the last space within `current` to avoid
-          // chopping words. If there's no space, hard break.
+        if (safeWidth(font, candidate, size) > maxWidth && current.length > 0) {
           const lastSpace = current.lastIndexOf(' ');
           if (lastSpace > 0) {
             lines.push(current.slice(0, lastSpace));
@@ -239,7 +260,7 @@
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit);
 
-    const koreanFont = await pdfDoc.embedFont(assets.koreanFont, { subset: true });
+    const koreanFont = await pdfDoc.embedFont(assets.koreanFont, { subset: false });
     const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
