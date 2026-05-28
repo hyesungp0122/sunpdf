@@ -266,8 +266,8 @@
     const headerH = sunparkImg.height * headerScale;
     const headerX = (PAGE_W - headerW) / 2;
 
-    // --- Footer (Better Properties logo + contact) ---
-    const footerLogoW = 70;
+    // --- Footer (Better Properties logo + contact, horizontally centered) ---
+    const footerLogoW = 90;
     const footerScale = footerLogoW / betterImg.width;
     const footerLogoH = betterImg.height * footerScale;
 
@@ -278,8 +278,9 @@
       { text: '253-241-2307', font: helvetica, size: 11 },
     ];
     const footerTextLineHeight = 15;
+    const footerLogoTextGap = 8;
     const footerTextBlockH = footerLines.length * footerTextLineHeight;
-    const footerBlockH = Math.max(footerLogoH, footerTextBlockH);
+    const footerBlockH = footerLogoH + footerLogoTextGap + footerTextBlockH;
 
     // Body region calculation
     const bodyFontSize = 12;
@@ -322,23 +323,22 @@
         y -= bodyLineHeight;
       }
 
-      // Footer logo
+      // Footer (centered): logo on top, text stacked below
       const footerY = MARGIN_BOTTOM;
-      const footerLogoY = footerY + (footerBlockH - footerLogoH) / 2;
+      const footerLogoY = footerY + footerTextBlockH + footerLogoTextGap;
+      const footerLogoX = (PAGE_W - footerLogoW) / 2;
       page.drawImage(betterImg, {
-        x: MARGIN_X,
+        x: footerLogoX,
         y: footerLogoY,
         width: footerLogoW,
         height: footerLogoH,
       });
 
-      // Footer text
-      const footerTextX = MARGIN_X + footerLogoW + 18;
-      const footerTextTopY = footerY + (footerBlockH + footerTextBlockH) / 2 - footerLines[0].size;
-      let ty = footerTextTopY;
+      let ty = footerY + footerTextBlockH - footerLines[0].size;
       for (const line of footerLines) {
+        const textW = line.font.widthOfTextAtSize(line.text, line.size);
         page.drawText(line.text, {
-          x: footerTextX,
+          x: (PAGE_W - textW) / 2,
           y: ty,
           size: line.size,
           font: line.font,
