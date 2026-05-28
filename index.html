@@ -385,13 +385,10 @@
   async function showPreview() {
     setStatus('미리보기 생성 중...');
     previewBtn.disabled = true;
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-      || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
     try {
       const bytes = await buildPdf();
       const blob = new Blob([bytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      // Stash previous blob URL so we can revoke it after the new one is rendered.
       const previewDiv = document.getElementById('preview');
       const prevUrl = previewDiv.dataset.url;
       previewDiv.dataset.url = url;
@@ -399,32 +396,30 @@
       previewDiv.innerHTML = '';
       previewDiv.classList.add('visible');
 
-      if (isMobile) {
-        // iOS Safari / Android Chrome do not reliably render PDFs in
-        // iframes and block window.open() after an `await`. The most
-        // reliable fix: render a big tap-to-open link the user clicks
-        // themselves — the tap is a fresh user gesture.
-        const link = document.createElement('a');
-        link.href = url;
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.className = 'open-pdf-link';
-        link.textContent = '📄 PDF 열기 (탭하세요)';
-        previewDiv.appendChild(link);
-        setStatus('PDF 준비됨 — 아래 버튼을 탭해서 여세요', 'ok');
-      } else {
+      // Primary action — always shown, works on every device.
+      // The user's tap is a fresh user gesture so mobile Safari opens
+      // the PDF reliably (iframes don't render PDFs on iOS).
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.className = 'open-pdf-link';
+      link.textContent = '📄 PDF 열기 / 새 탭에서 보기';
+      previewDiv.appendChild(link);
+
+      // Secondary: inline iframe — works on desktop, blank on iOS but
+      // harmless since the link above already covers the mobile case.
+      // We try anyway so desktop users get instant inline preview.
+      const canInlinePreview = !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+        && !(navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+      if (canInlinePreview) {
         const frame = document.createElement('iframe');
         frame.src = url;
         previewDiv.appendChild(frame);
-        const fallback = document.createElement('a');
-        fallback.href = url;
-        fallback.target = '_blank';
-        fallback.rel = 'noopener';
-        fallback.className = 'open-pdf-link';
-        fallback.textContent = '새 탭에서 열기';
-        previewDiv.appendChild(fallback);
-        setStatus('미리보기 준비 완료', 'ok');
       }
+
+      setStatus('PDF 준비됨 — 아래 파란 버튼을 탭하세요', 'ok');
+      link.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
       if (prevUrl) setTimeout(() => URL.revokeObjectURL(prevUrl), 2000);
     } catch (e) {
