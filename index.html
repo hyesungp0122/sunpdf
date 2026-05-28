@@ -3,9 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
 <title>Sun Park PDF Maker</title>
 <style>
   :root {
@@ -172,7 +169,7 @@
   }
 
   // Bump this when assets change to force-bust browser cache.
-  const ASSET_VERSION = '7';
+  const ASSET_VERSION = '8';
 
   async function loadAssets() {
     setStatus('로고와 폰트 로딩 중...');
@@ -431,6 +428,27 @@
   window.addEventListener('unhandledrejection', (e) => {
     setStatus('오류: ' + (e.reason && e.reason.message ? e.reason.message : e.reason), 'error');
   });
+
+  // Persist body + filename across reloads / back-navigation so the
+  // user never loses what they typed.
+  const bodyEl = document.getElementById('body');
+  const filenameEl = document.getElementById('filename');
+  const STORAGE_KEY = 'sunpdf:v1';
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    if (typeof saved.body === 'string') bodyEl.value = saved.body;
+    if (typeof saved.filename === 'string' && saved.filename) filenameEl.value = saved.filename;
+  } catch (_) {}
+  function persist() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        body: bodyEl.value,
+        filename: filenameEl.value,
+      }));
+    } catch (_) {}
+  }
+  bodyEl.addEventListener('input', persist);
+  filenameEl.addEventListener('input', persist);
 
   generateBtn.disabled = true;
   loadAssets();
