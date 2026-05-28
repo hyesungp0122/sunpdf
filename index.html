@@ -107,9 +107,14 @@
     border-radius: 8px;
     background: white;
   }
+  .preview-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
   .open-pdf-link {
+    flex: 1;
     display: block;
-    margin-top: 14px;
     padding: 14px 18px;
     background: var(--primary);
     color: white !important;
@@ -120,6 +125,12 @@
     font-size: 15px;
   }
   .open-pdf-link:active { background: var(--primary-hover); }
+  .open-pdf-link.secondary-link {
+    background: white;
+    color: var(--primary) !important;
+    border: 1px solid var(--primary);
+  }
+  .open-pdf-link.secondary-link:active { background: #eef2f9; }
 </style>
 </head>
 <body>
@@ -134,8 +145,7 @@
     <textarea id="body" placeholder="여기에 본문 내용을 입력하세요..."></textarea>
 
     <div class="actions">
-      <button id="generate">PDF 다운로드</button>
-      <button id="preview-btn" class="secondary">미리보기</button>
+      <button id="generate">PDF 만들기</button>
     </div>
     <div class="status" id="status">준비 중...</div>
   </div>
@@ -155,7 +165,6 @@
 
   const statusEl = document.getElementById('status');
   const generateBtn = document.getElementById('generate');
-  const previewBtn = document.getElementById('preview-btn');
 
   function setStatus(msg, type) {
     statusEl.textContent = msg;
@@ -163,7 +172,7 @@
   }
 
   // Bump this when assets change to force-bust browser cache.
-  const ASSET_VERSION = '5';
+  const ASSET_VERSION = '6';
 
   async function loadAssets() {
     setStatus('로고와 폰트 로딩 중...');
@@ -187,74 +196,41 @@
       assets.koreanFont = kf;
       setStatus('준비 완료', 'ok');
       generateBtn.disabled = false;
-      previewBtn.disabled = false;
     } catch (e) {
       setStatus('에셋 로딩 실패: ' + e.message + ' — assets/ 폴더를 확인해주세요.', 'error');
       generateBtn.disabled = true;
-      previewBtn.disabled = true;
     }
   }
 
+  // Character-by-character wrapper. Handles Korean (no inter-word spaces),
+  // English, and mixed text. Prefers breaking at the last whitespace on the
+  // current line; falls back to a hard character break if no space is found
+  // (e.g. long Korean run, URLs).
   function wrapText(text, font, size, maxWidth) {
-    const paragraphs = text.split('\n');
     const lines = [];
-    for (const para of paragraphs) {
-      if (para === '') { lines.push(''); continue; }
-      // For Korean text, word-by-word split via spaces won't always work,
-      // so we fall back to per-character wrapping if a single token exceeds width.
-      const tokens = para.split(/(\s+)/); // keep spaces as tokens
+    for (const paragraph of text.split('\n')) {
+      if (paragraph === '') { lines.push(''); continue; }
       let current = '';
-      for (const tok of tokens) {
-        const test = current + tok;
-        const w = font.widthOfTextAtSize(test, size);
-        if (w > maxWidth && current.trim() !== '') {
-          lines.push(current.replace(/\s+$/, ''));
-          current = tok.replace(/^\s+/, '');
-        } else {
-          current = test;
-        }
-      }
-      // If a single token is still too wide (e.g. very long Korean run), split by char
-      const flushed = [];
-      for (const line of [current]) {
-        if (font.widthOfTextAtSize(line, size) <= maxWidth) {
-          flushed.push(line);
-        } else {
-          let buf = '';
-          for (const ch of line) {
-            const t = buf + ch;
-            if (font.widthOfTextAtSize(t, size) > maxWidth && buf) {
-              flushed.push(buf);
-              buf = ch;
-            } else {
-              buf = t;
-            }
-          }
-          if (buf) flushed.push(buf);
-        }
-      }
-      lines.push(...flushed);
-    }
-    // Also need to char-wrap any pushed lines that are still too wide
-    const finalLines = [];
-    for (const l of lines) {
-      if (font.widthOfTextAtSize(l, size) <= maxWidth) {
-        finalLines.push(l);
-      } else {
-        let buf = '';
-        for (const ch of l) {
-          const t = buf + ch;
-          if (font.widthOfTextAtSize(t, size) > maxWidth && buf) {
-            finalLines.push(buf);
-            buf = ch;
+      for (const ch of paragraph) {
+        const candidate = current + ch;
+        if (font.widthOfTextAtSize(candidate, size) > maxWidth && current.length > 0) {
+          // Try to break at the last space within `current` to avoid
+          // chopping words. If there's no space, hard break.
+          const lastSpace = current.lastIndexOf(' ');
+          if (lastSpace > 0) {
+            lines.push(current.slice(0, lastSpace));
+            current = current.slice(lastSpace + 1) + ch;
           } else {
-            buf = t;
+            lines.push(current);
+            current = ch;
           }
+        } else {
+          current = candidate;
         }
-        if (buf) finalLines.push(buf);
       }
+      lines.push(current);
     }
-    return finalLines;
+    return lines;
   }
 
   async function buildPdf() {
@@ -368,54 +344,44 @@
     return await pdfDoc.save();
   }
 
-  async function downloadPdf() {
+  async function generatePdf() {
     setStatus('PDF 생성 중...');
     generateBtn.disabled = true;
     try {
       const bytes = await buildPdf();
-      const name = (document.getElementById('filename').value.trim() || 'document') + '.pdf';
+      const filename = (document.getElementById('filename').value.trim() || 'document') + '.pdf';
       const blob = new Blob([bytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = name; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setStatus('다운로드 완료: ' + name, 'ok');
-    } catch (e) {
-      console.error(e);
-      setStatus('생성 실패: ' + e.message, 'error');
-    } finally {
-      generateBtn.disabled = false;
-    }
-  }
 
-  async function showPreview() {
-    setStatus('미리보기 생성 중...');
-    previewBtn.disabled = true;
-    try {
-      const bytes = await buildPdf();
-      const blob = new Blob([bytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
       const previewDiv = document.getElementById('preview');
       const prevUrl = previewDiv.dataset.url;
       previewDiv.dataset.url = url;
-
       previewDiv.innerHTML = '';
       previewDiv.classList.add('visible');
 
-      // Primary action — always shown, works on every device.
-      // The user's tap is a fresh user gesture so mobile Safari opens
-      // the PDF reliably (iframes don't render PDFs on iOS).
-      const link = document.createElement('a');
-      link.href = url;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      link.className = 'open-pdf-link';
-      link.textContent = '📄 PDF 열기 / 새 탭에서 보기';
-      previewDiv.appendChild(link);
+      // Action row: download + open in new tab
+      const actions = document.createElement('div');
+      actions.className = 'preview-actions';
 
-      // Secondary: inline iframe — works on desktop, blank on iOS but
-      // harmless since the link above already covers the mobile case.
-      // We try anyway so desktop users get instant inline preview.
+      const downloadLink = document.createElement('a');
+      downloadLink.href = url;
+      downloadLink.download = filename;
+      downloadLink.className = 'open-pdf-link';
+      downloadLink.textContent = '⬇ 다운로드';
+      actions.appendChild(downloadLink);
+
+      const openLink = document.createElement('a');
+      openLink.href = url;
+      openLink.target = '_blank';
+      openLink.rel = 'noopener';
+      openLink.className = 'open-pdf-link secondary-link';
+      openLink.textContent = '📄 열기 / 보기';
+      actions.appendChild(openLink);
+
+      previewDiv.appendChild(actions);
+
+      // Inline iframe preview — works on desktop, blank on iOS but
+      // harmless since the buttons above already cover mobile.
       const canInlinePreview = !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
         && !(navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
       if (canInlinePreview) {
@@ -424,20 +390,19 @@
         previewDiv.appendChild(frame);
       }
 
-      setStatus('PDF 준비됨 — 아래 파란 버튼을 탭하세요', 'ok');
-      link.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setStatus('PDF 생성 완료 — 다운로드 또는 열기 버튼을 누르세요', 'ok');
+      actions.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
       if (prevUrl) setTimeout(() => URL.revokeObjectURL(prevUrl), 2000);
     } catch (e) {
       console.error(e);
-      setStatus('미리보기 실패: ' + e.message, 'error');
+      setStatus('생성 실패: ' + e.message, 'error');
     } finally {
-      previewBtn.disabled = false;
+      generateBtn.disabled = false;
     }
   }
 
-  generateBtn.addEventListener('click', downloadPdf);
-  previewBtn.addEventListener('click', showPreview);
+  generateBtn.addEventListener('click', generatePdf);
 
   window.addEventListener('error', (e) => {
     setStatus('오류: ' + (e.message || e.error), 'error');
@@ -447,7 +412,6 @@
   });
 
   generateBtn.disabled = true;
-  previewBtn.disabled = true;
   loadAssets();
 </script>
 </body>
